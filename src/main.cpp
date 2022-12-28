@@ -11,12 +11,33 @@
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
+#include <BLE2902.h>
 
 // ------------------ Const and Define variables START ------------------
 
 // Bluetooth
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define bleServerName "LOADCELL_ESP32"
+
+bool deviceConnected = false;
+
+// Timer variables
+unsigned long lastTime = 0;
+unsigned long timerDelay = 5000;
+
+// Setup callbacks onConnect and onDisconnect
+class MyServerCallbacks : public BLEServerCallbacks
+{
+  void onConnect(BLEServer *pServer)
+  {
+    deviceConnected = true;
+  };
+  void onDisconnect(BLEServer *pServer)
+  {
+    deviceConnected = false;
+  }
+};
 
 // Display Const
 #define SCREEN_WIDTH 128 // OLED width,  in pixels
@@ -31,6 +52,10 @@ HX711 scale;
 
 // create an OLED display object connected to I2C
 Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// LoadCell Characteristic and Descriptor
+BLECharacteristic loadCellCharacteristics(CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+BLEDescriptor loadCellDescriptor(BLEUUID((uint16_t)0x2902));
 
 // ------------------ Const and Define variables END ------------------
 
@@ -54,33 +79,13 @@ void displayAndLoadCellInit()
   oled.setCursor(0, 10);
 }
 
-void bluetoothInit()
+void initLoadCell()
 {
-  // Start BLE Device Init
-  BLEDevice::init("ESP32 Balanza");
-
-  // Creating Server
-  BLEServer *pServer = BLEDevice::createServer();
-
-  // Creating Service
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-
-  // Adding Characteristics of Service
-  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
-      CHARACTERISTIC_UUID,
-      BLECharacteristic::PROPERTY_READ |
-          BLECharacteristic::PROPERTY_WRITE);
-
-  pCharacteristic->setValue("Hello World says Neil");
-  pService->start();
-  // BLEAdvertising *pAdvertising = pServer->getAdvertising();  // this still is working for backward compatibility
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06); // functions that help with iPhone connections issue
-  pAdvertising->setMinPreferred(0x12);
-  BLEDevice::startAdvertising();
-  Serial.println("Characteristic defined! Now you can read it in your phone!");
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+  if (!scale.is_ready())
+  {
+    Serial.println("HX711 No Encontrado.");
+  }
 }
 
 void loadCellCalibration()
@@ -89,8 +94,6 @@ void loadCellCalibration()
   // put your main code here, to run repeatedly:
   if (scale.is_ready())
   {
-
-    
 
     scale.set_scale();
 
@@ -109,7 +112,7 @@ void loadCellCalibration()
     {
       long reading = scale.get_units(10);
       delay(100);
-      
+
       Serial.print(reading);
     }
 
@@ -146,14 +149,53 @@ void setup()
   // put your setup code here, to run once:
   Serial.begin(115200);
 
-  // Bluetooth Init Connection
-  bluetoothInit();
+  //--------------------- LoadCell Configuration and INIT --------------------------
+  initLoadCell();
 
-  // initialize OLED display with I2C address 0x3C
-  displayAndLoadCellInit();
+  //--------------------- Bluetooth Configuration and INIT --------------------------
+  // Create the BLE Device
+  BLEDevice::init(bleServerName);
+
+  // Create the BLE Server
+  BLEServer *pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  // Create the BLE Service
+  BLEService *bleService = pServer->createService(SERVICE_UUID);
+
+  // Create BLE Characteristics and Create a BLE Descriptor
+  bleService->addCharacteristic(&loadCellCharacteristics);
+  loadCellDescriptor.setValue("Balanza peso registrado");
+  loadCellCharacteristics.addDescriptor(&loadCellDescriptor);
+
+  // Start the service
+  bleService->start();
+
+  // Start advertising
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pServer->getAdvertising()->start();
+  Serial.println("Waiting a client connection to notify...");
 }
 
 void loop()
 {
-  loadCellCalibration();
+
+  if (deviceConnected)
+  {
+    if ((millis() - lastTime) > timerDelay)
+    {
+      scale.set_scale();
+      scale.tare();
+      long reading = scale.get_units(10);
+      loadCellCharacteristics.setValue(reading);
+      Serial.print("Resultado: ");
+      Serial.println(reading);
+
+      loadCellCharacteristics.notify();
+      lastTime = millis();
+    }
+  }
+
+  // loadCellCalibration();
 }
