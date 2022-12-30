@@ -20,24 +20,15 @@
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define bleServerName "LOADCELL_ESP32"
 
+BLEServer *pServer;
+BLEService *pService;
+BLECharacteristic *pCharacteristic;
+
 bool deviceConnected = false;
 
 // Timer variables
 unsigned long lastTime = 0;
 unsigned long timerDelay = 5000;
-
-// Setup callbacks onConnect and onDisconnect
-class MyServerCallbacks : public BLEServerCallbacks
-{
-  void onConnect(BLEServer *pServer)
-  {
-    deviceConnected = true;
-  };
-  void onDisconnect(BLEServer *pServer)
-  {
-    deviceConnected = false;
-  }
-};
 
 // Display Const
 #define SCREEN_WIDTH 128 // OLED width,  in pixels
@@ -53,10 +44,22 @@ HX711 scale;
 // create an OLED display object connected to I2C
 Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-// LoadCell Characteristic and Descriptor
-BLECharacteristic loadCellCharacteristics(CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
-BLEDescriptor loadCellDescriptor(BLEUUID((uint16_t)0x2902));
 
+// Setup callbacks onConnect and onDisconnect
+class MyServerCallbacks : public BLEServerCallbacks
+{
+  void onConnect(BLEServer *pServer)
+  {
+    deviceConnected = true;
+    Serial.print("Connected");
+  };
+  void onDisconnect(BLEServer *pServer)
+  {
+    Serial.print("Disconnected");
+    deviceConnected = false;
+    pServer->getAdvertising()->start();
+  }
+};
 // ------------------ Const and Define variables END ------------------
 
 // ------------------ Steps Functions INIT ------------------
@@ -157,23 +160,20 @@ void setup()
   BLEDevice::init(bleServerName);
 
   // Create the BLE Server
-  BLEServer *pServer = BLEDevice::createServer();
+  pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
   // Create the BLE Service
-  BLEService *bleService = pServer->createService(SERVICE_UUID);
+  pService = pServer->createService(SERVICE_UUID);
 
   // Create BLE Characteristics and Create a BLE Descriptor
-  bleService->addCharacteristic(&loadCellCharacteristics);
-  loadCellDescriptor.setValue("Balanza peso registrado");
-  loadCellCharacteristics.addDescriptor(&loadCellDescriptor);
-
+  pCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  pCharacteristic->addDescriptor(new BLE2902());
+  
   // Start the service
-  bleService->start();
+  pService->start();
 
   // Start advertising
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
   pServer->getAdvertising()->start();
   Serial.println("Waiting a client connection to notify...");
 }
@@ -188,12 +188,22 @@ void loop()
       scale.set_scale();
       scale.tare();
       long reading = scale.get_units(10);
-      loadCellCharacteristics.setValue(reading);
-      Serial.print("Resultado: ");
-      Serial.println(reading);
 
-      loadCellCharacteristics.notify();
+      char txString[8];
+      dtostrf(reading, 1, 0, txString);
+      
+      pCharacteristic->setValue(txString);
+
+      pCharacteristic->notify();
+
+      Serial.println("Enviando Valor: " + String(txString) );
+      // loadCellCharacteristics.setValue(txValue);
+      // Serial.print("Resultado: ");
+      // Serial.println(reading);
+
+      // loadCellCharacteristics.notify();
       lastTime = millis();
+      // txValue++;
     }
   }
 
