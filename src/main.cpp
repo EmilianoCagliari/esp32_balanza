@@ -33,6 +33,7 @@ unsigned long timerDelay = 5000;
 // Display Const
 #define SCREEN_WIDTH 128 // OLED width,  in pixels
 #define SCREEN_HEIGHT 64 // OLED height, in pixels
+#define OLED_RESET -1 //OLED RESET
 
 // HX711 circuit wiring
 const int LOADCELL_DOUT_PIN = 16;
@@ -42,9 +43,9 @@ const int LOADCELL_SCK_PIN = 4;
 HX711 scale;
 
 // create an OLED display object connected to I2C
-Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-
-
+Adafruit_SSD1306 display (SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+uint8_t oled_buf[SCREEN_WIDTH * SCREEN_HEIGHT / 8];
+//  SSD1306_bitmap(24, 2,Bluetooth88, 8, 8, oled_buf);
 // Setup callbacks onConnect and onDisconnect
 class MyServerCallbacks : public BLEServerCallbacks
 {
@@ -64,22 +65,43 @@ class MyServerCallbacks : public BLEServerCallbacks
 
 // ------------------ Steps Functions INIT ------------------
 
-void displayAndLoadCellInit()
+void displayWeight(char * weight)
 {
-  if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(64, 10);
+  // Display static text
+  display.println("Weight:");
+  display.display();
+  display.setCursor(64, 30);
+  display.setTextSize(2);
+  display.print(weight);
+  display.print(" ");
+  display.print("g");
+  display.display();
+}
+
+void displayInit()
+{
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
   {
     Serial.println(F("failed to start SSD1306 OLED"));
     while (1)
       ;
   }
-  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+  // scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
 
-  delay(1000);         // wait two seconds for initializing
-  oled.clearDisplay(); // clear display
-
-  oled.setTextSize(1);      // set text size
-  oled.setTextColor(WHITE); // set text color
-  oled.setCursor(0, 10);
+  // delay(1000);         // wait two seconds for initializing
+  display.clearDisplay(); // clear display
+  // display.drawRect(0, 0, SCREEN_WIDTH, 10, WHITE);
+  display.setTextSize(1);      // set text size
+  display.setTextColor(WHITE); // set text color
+  display.setCursor(64, 10);
+  display.println();
+  display.println("BLE Waiting...");
+  display.display();
+  
 }
 
 void initLoadCell()
@@ -155,6 +177,9 @@ void setup()
   //--------------------- LoadCell Configuration and INIT --------------------------
   initLoadCell();
 
+  //--------------------- Display Configuration and INIT --------------------------
+  displayInit();
+
   //--------------------- Bluetooth Configuration and INIT --------------------------
   // Create the BLE Device
   BLEDevice::init(bleServerName);
@@ -169,7 +194,7 @@ void setup()
   // Create BLE Characteristics and Create a BLE Descriptor
   pCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
   pCharacteristic->addDescriptor(new BLE2902());
-  
+
   // Start the service
   pService->start();
 
@@ -191,15 +216,17 @@ void loop()
 
       char txString[8];
       dtostrf(reading, 1, 0, txString);
-      
+
       pCharacteristic->setValue(txString);
 
       pCharacteristic->notify();
 
-      Serial.println("Enviando Valor: " + String(txString) );
+      Serial.println("Enviando Valor: " + String(txString));
       // loadCellCharacteristics.setValue(txValue);
       // Serial.print("Resultado: ");
       // Serial.println(reading);
+
+      displayWeight(txString);
 
       // loadCellCharacteristics.notify();
       lastTime = millis();
