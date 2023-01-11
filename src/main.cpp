@@ -1,8 +1,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 // Display
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+// #include <Adafruit_GFX.h>
+// #include <Adafruit_SSD1306.h>
 // Balanza - Load Cell
 #include "soc/rtc.h"
 #include "HX711.h"
@@ -16,8 +16,8 @@
 // ------------------ Const and Define variables START ------------------
 
 // Bluetooth
-#define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define SERVICE_UUID "a0398e18-9136-11ed-a1eb-0242ac120002"
+#define CHARACTERISTIC_UUID "a0399462-9136-11ed-a1eb-0242ac120002"
 #define bleServerName "LOADCELL_ESP32"
 
 BLEServer *pServer;
@@ -28,12 +28,12 @@ bool deviceConnected = false;
 
 // Timer variables
 unsigned long lastTime = 0;
-unsigned long timerDelay = 5000;
+unsigned long timerDelay = 2000;
 
 // Display Const
-#define SCREEN_WIDTH 128 // OLED width,  in pixels
-#define SCREEN_HEIGHT 64 // OLED height, in pixels
-#define OLED_RESET -1 //OLED RESET
+// #define SCREEN_WIDTH 128 // OLED width,  in pixels
+// #define SCREEN_HEIGHT 64 // OLED height, in pixels
+// #define OLED_RESET -1 //OLED RESET
 
 // HX711 circuit wiring
 const int LOADCELL_DOUT_PIN = 16;
@@ -43,8 +43,9 @@ const int LOADCELL_SCK_PIN = 4;
 HX711 scale;
 
 // create an OLED display object connected to I2C
-Adafruit_SSD1306 display (SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-uint8_t oled_buf[SCREEN_WIDTH * SCREEN_HEIGHT / 8];
+
+// Adafruit_SSD1306 display (SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+// uint8_t oled_buf[SCREEN_WIDTH * SCREEN_HEIGHT / 8];
 //  SSD1306_bitmap(24, 2,Bluetooth88, 8, 8, oled_buf);
 // Setup callbacks onConnect and onDisconnect
 class MyServerCallbacks : public BLEServerCallbacks
@@ -65,44 +66,44 @@ class MyServerCallbacks : public BLEServerCallbacks
 
 // ------------------ Steps Functions INIT ------------------
 
-void displayWeight(char * weight)
-{
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor(64, 10);
-  // Display static text
-  display.println("Weight:");
-  display.display();
-  display.setCursor(64, 30);
-  display.setTextSize(2);
-  display.print(weight);
-  display.print(" ");
-  display.print("g");
-  display.display();
-}
+// void displayWeight(char * weight)
+// {
+//   display.clearDisplay();
+//   display.setTextSize(1);
+//   display.setTextColor(WHITE);
+//   display.setCursor(64, 10);
+//   // Display static text
+//   display.println("Weight:");
+//   display.display();
+//   display.setCursor(64, 30);
+//   display.setTextSize(2);
+//   display.print(weight);
+//   display.print(" ");
+//   display.print("g");
+//   display.display();
+// }
 
-void displayInit()
-{
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-  {
-    Serial.println(F("failed to start SSD1306 OLED"));
-    while (1)
-      ;
-  }
-  // scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+// void displayInit()
+// {
+//   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+//   {
+//     Serial.println(F("failed to start SSD1306 OLED"));
+//     while (1)
+//       ;
+//   }
+//   // scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
 
-  // delay(1000);         // wait two seconds for initializing
-  display.clearDisplay(); // clear display
-  // display.drawRect(0, 0, SCREEN_WIDTH, 10, WHITE);
-  display.setTextSize(1);      // set text size
-  display.setTextColor(WHITE); // set text color
-  display.setCursor(64, 10);
-  display.println();
-  display.println("BLE Waiting...");
-  display.display();
+//   // delay(1000);         // wait two seconds for initializing
+//   display.clearDisplay(); // clear display
+//   // display.drawRect(0, 0, SCREEN_WIDTH, 10, WHITE);
+//   display.setTextSize(1);      // set text size
+//   display.setTextColor(WHITE); // set text color
+//   display.setCursor(64, 10);
+//   display.println();
+//   display.println("BLE Waiting...");
+//   display.display();
   
-}
+// }
 
 void initLoadCell()
 {
@@ -169,6 +170,8 @@ void loadCellCalibration()
 }
 
 // ------------------ Steps Functions END ------------------
+
+
 void setup()
 {
   // put your setup code here, to run once:
@@ -178,7 +181,7 @@ void setup()
   initLoadCell();
 
   //--------------------- Display Configuration and INIT --------------------------
-  displayInit();
+  // displayInit();
 
   //--------------------- Bluetooth Configuration and INIT --------------------------
   // Create the BLE Device
@@ -203,6 +206,8 @@ void setup()
   Serial.println("Waiting a client connection to notify...");
 }
 
+
+
 void loop()
 {
 
@@ -226,7 +231,7 @@ void loop()
       // Serial.print("Resultado: ");
       // Serial.println(reading);
 
-      displayWeight(txString);
+      // displayWeight(txString);
 
       // loadCellCharacteristics.notify();
       lastTime = millis();
