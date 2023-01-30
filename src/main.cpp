@@ -1,243 +1,178 @@
 #include <Arduino.h>
-#include <Wire.h>
-// Display
-// #include <Adafruit_GFX.h>
-// #include <Adafruit_SSD1306.h>
-// Balanza - Load Cell
-#include "soc/rtc.h"
 #include "HX711.h"
+#include "soc/rtc.h"
+#include <Pushbutton.h>
 
-// Bluetooth Low Energy
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEServer.h>
-#include <BLE2902.h>
+#include <WebSocketsClient.h>
+#include <SocketIOclient.h>
 
-// ------------------ Const and Define variables START ------------------
+#include <ArduinoJson.h>
 
-// Bluetooth
-#define SERVICE_UUID "a0398e18-9136-11ed-a1eb-0242ac120002"
-#define CHARACTERISTIC_UUID "a0399462-9136-11ed-a1eb-0242ac120002"
-#define bleServerName "LOADCELL_ESP32"
-
-BLEServer *pServer;
-BLEService *pService;
-BLECharacteristic *pCharacteristic;
-
-bool deviceConnected = false;
-
-// Timer variables
-unsigned long lastTime = 0;
-unsigned long timerDelay = 2000;
-
-// Display Const
-// #define SCREEN_WIDTH 128 // OLED width,  in pixels
-// #define SCREEN_HEIGHT 64 // OLED height, in pixels
-// #define OLED_RESET -1 //OLED RESET
+#include <WiFiMulti.h>
 
 // HX711 circuit wiring
 const int LOADCELL_DOUT_PIN = 16;
 const int LOADCELL_SCK_PIN = 4;
 
-// Global variable
 HX711 scale;
+int reading;
+int lastReading;
 
-// create an OLED display object connected to I2C
+//REPLACE WITH YOUR CALIBRATION FACTOR
+#define CALIBRATION_FACTOR 395.476
 
-// Adafruit_SSD1306 display (SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-// uint8_t oled_buf[SCREEN_WIDTH * SCREEN_HEIGHT / 8];
-//  SSD1306_bitmap(24, 2,Bluetooth88, 8, 8, oled_buf);
-// Setup callbacks onConnect and onDisconnect
-class MyServerCallbacks : public BLEServerCallbacks
-{
-  void onConnect(BLEServer *pServer)
-  {
-    deviceConnected = true;
-    Serial.print("Connected");
-  };
-  void onDisconnect(BLEServer *pServer)
-  {
-    Serial.print("Disconnected");
-    deviceConnected = false;
-    pServer->getAdvertising()->start();
-  }
-};
-// ------------------ Const and Define variables END ------------------
 
-// ------------------ Steps Functions INIT ------------------
+//Button
+#define BUTTON_PIN 19
+Pushbutton button(BUTTON_PIN);
 
-// void displayWeight(char * weight)
-// {
-//   display.clearDisplay();
-//   display.setTextSize(1);
-//   display.setTextColor(WHITE);
-//   display.setCursor(64, 10);
-//   // Display static text
-//   display.println("Weight:");
-//   display.display();
-//   display.setCursor(64, 30);
-//   display.setTextSize(2);
-//   display.print(weight);
-//   display.print(" ");
-//   display.print("g");
-//   display.display();
-// }
 
-// void displayInit()
-// {
-//   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-//   {
-//     Serial.println(F("failed to start SSD1306 OLED"));
-//     while (1)
-//       ;
-//   }
-//   // scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+WiFiMulti wifimulti;
+SocketIOclient socketIO;
 
-//   // delay(1000);         // wait two seconds for initializing
-//   display.clearDisplay(); // clear display
-//   // display.drawRect(0, 0, SCREEN_WIDTH, 10, WHITE);
-//   display.setTextSize(1);      // set text size
-//   display.setTextColor(WHITE); // set text color
-//   display.setCursor(64, 10);
-//   display.println();
-//   display.println("BLE Waiting...");
-//   display.display();
-  
-// }
-
-void initLoadCell()
-{
-  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
-  if (!scale.is_ready())
-  {
-    Serial.println("HX711 No Encontrado.");
-  }
+void hexdump(const void *mem, uint32_t len, uint8_t cols = 16) {
+	const uint8_t* src = (const uint8_t*) mem;
+	Serial.printf("\n[HEXDUMP] Address: 0x%08X len: 0x%X (%d)", (ptrdiff_t)src, len, len);
+	for(uint32_t i = 0; i < len; i++) {
+		if(i % cols == 0) {
+			Serial.printf("\n[0x%08X] 0x%08X: ", (ptrdiff_t)src, i);
+		}
+		Serial.printf("%02X ", *src);
+		src++;
+	}
+	Serial.printf("\n");
 }
 
-void loadCellCalibration()
-{
+void socketIOEvent(socketIOmessageType_t type, uint8_t * payload, size_t length) {
+    switch(type) {
+        case sIOtype_DISCONNECT:
+            Serial.printf("[IOc] Disconnected!\n");
+            break;
+        case sIOtype_CONNECT:
+            Serial.printf("[IOc] Connected to url: %s\n", payload);
 
-  // put your main code here, to run repeatedly:
-  if (scale.is_ready())
-  {
-
-    scale.set_scale();
-
-    // Serial.println("Tare... remove any weights from the scale.");
-    Serial.println("");
-    Serial.println("Peso de Tara... remueva cualquier peso de la balanza.");
-    delay(500);
-    scale.tare();
-    // Serial.println("Tare done...");
-    Serial.println("Peso de tara completo...");
-    // Serial.print("Place a known weight on the scale...");
-    Serial.print("Coloque un valor de peso conocido en la balanza...");
-    delay(5000);
-    Serial.print("Resultado: ");
-    while (true)
-    {
-      long reading = scale.get_units(10);
-      delay(100);
-
-      Serial.print(reading);
+            // join default namespace (no auto join in Socket.IO V3)
+            socketIO.send(sIOtype_CONNECT, "/");
+            break;
+        case sIOtype_EVENT:
+            Serial.printf("[IOc] get event: %s\n", payload);
+            break;
+        case sIOtype_ACK:
+            Serial.printf("[IOc] get ack: %u\n", length);
+            hexdump(payload, length);
+            break;
+        case sIOtype_ERROR:
+            Serial.printf("[IOc] get error: %u\n", length);
+            hexdump(payload, length);
+            break;
+        case sIOtype_BINARY_EVENT:
+            Serial.printf("[IOc] get binary: %u\n", length);
+            hexdump(payload, length);
+            break;
+        case sIOtype_BINARY_ACK:
+            Serial.printf("[IOc] get binary ack: %u\n", length);
+            hexdump(payload, length);
+            break;
     }
-
-    // oled.println("Calibrando Peso Tara");
-    // delay(500);
-    // scale.tare();
-    // oled.println("Calibrado completo...");
-    // delay(500);
-    // oled.clearDisplay();
-
-    // oled.println("prueba de balanza"); // set text
-    // oled.print("Resultado: ");
-    // oled.display();
-
-    // while (true)
-    // {
-    //   long reading = scale.get_units(10);
-    //   delay(100);
-    //   oled.print(reading);
-    //   oled.display();
-    // }
-  }
-  else
-  {
-    // Serial.println("HX711 not found.");
-    Serial.println("HX711 No Encontrado.");
-  }
-  delay(1000);
 }
 
-// ------------------ Steps Functions END ------------------
 
 
-void setup()
-{
-  // put your setup code here, to run once:
+
+void setup() {
   Serial.begin(115200);
+  delay(2000);
 
-  //--------------------- LoadCell Configuration and INIT --------------------------
-  initLoadCell();
 
-  //--------------------- Display Configuration and INIT --------------------------
-  // displayInit();
+  for(uint8_t t = 4; t > 0; t--) {
+      Serial.printf("[SETUP] BOOT WAIT %d...\n", t);
+      Serial.flush();
+      delay(1000);
+  }
 
-  //--------------------- Bluetooth Configuration and INIT --------------------------
-  // Create the BLE Device
-  BLEDevice::init(bleServerName);
+  // disable AP
+  if(WiFi.getMode() & WIFI_AP) {
+      WiFi.softAPdisconnect(true);
+  }
 
-  // Create the BLE Server
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
+  wifimulti.addAP("MIWIFI_2G_3iyZ", "DmrTqfTw");
 
-  // Create the BLE Service
-  pService = pServer->createService(SERVICE_UUID);
+  //WiFi.disconnect();
+  while(wifimulti.run() != WL_CONNECTED) {
+      delay(100);
+  }
+  
+  String ip = WiFi.localIP().toString();
+  Serial.printf("[SETUP] WiFi Connected %s\n", ip.c_str());
 
-  // Create BLE Characteristics and Create a BLE Descriptor
-  pCharacteristic = pService->createCharacteristic(CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_NOTIFY);
-  pCharacteristic->addDescriptor(new BLE2902());
+  // server address, port and URL
+  socketIO.begin("192.168.1.133", 8081, "/socket.io/?EIO=4");
 
-  // Start the service
-  pService->start();
+  // event handler
+  socketIO.onEvent(socketIOEvent);
 
-  // Start advertising
-  pServer->getAdvertising()->start();
-  Serial.println("Waiting a client connection to notify...");
+
+  Serial.println("Initializing the scale");
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+
+  scale.set_scale(CALIBRATION_FACTOR);   // this value is obtained by calibrating the scale with known weights; see the README for details
+  scale.tare();               // reset the scale to 0
 }
 
 
+unsigned long messageTimestamp = 0;
 
-void loop()
-{
+void loop() {
 
-  if (deviceConnected)
-  {
-    if ((millis() - lastTime) > timerDelay)
-    {
-      scale.set_scale();
-      scale.tare();
-      long reading = scale.get_units(10);
 
-      char txString[8];
-      dtostrf(reading, 1, 0, txString);
+socketIO.loop();
 
-      pCharacteristic->setValue(txString);
+    uint64_t now = millis();
 
-      pCharacteristic->notify();
+    if(now - messageTimestamp > 2000) {
+        messageTimestamp = now;
 
-      Serial.println("Enviando Valor: " + String(txString));
-      // loadCellCharacteristics.setValue(txValue);
-      // Serial.print("Resultado: ");
-      // Serial.println(reading);
+        // creat JSON message for Socket.IO (event)
+        DynamicJsonDocument doc(1024);
+        JsonArray array = doc.to<JsonArray>();
 
-      // displayWeight(txString);
+        // add evnet name
+        // Hint: socket.on('event_name', ....
+        array.add("mensaje");
 
-      // loadCellCharacteristics.notify();
-      lastTime = millis();
-      // txValue++;
+        // add payload (parameters) for the event
+        JsonObject param1 = array.createNestedObject();
+        param1["Balanza Mensaje Test:"] = (uint32_t) now;
+
+        // JSON to String (serializion)
+        String output;
+        serializeJson(doc, output);
+
+        // Send event
+        socketIO.sendEVENT(output);
+
+        // Print JSON for debugging
+        Serial.println(output);
     }
-  }
 
-  // loadCellCalibration();
+
+
+
+
+
+
+  // if (button.getSingleDebouncedPress()){
+  //   Serial.print("tare...");
+  //   scale.tare();
+  // }
+  
+  // if (scale.wait_ready_timeout(200)) {
+  //   reading = round(scale.get_units());
+  //   Serial.print("Weight: ");
+  //   Serial.println(reading);
+  //   lastReading = reading;
+  // }
+  // else {
+  //   Serial.println("HX711 not found.");
+  // }
 }

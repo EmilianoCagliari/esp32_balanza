@@ -2,6 +2,7 @@
     "files.associations": {
         "*.css": "css",
         "css": "css",
-        "random": "cpp"
+        "random": "cpp",
+        "cmath": "cpp"
     }
 }
