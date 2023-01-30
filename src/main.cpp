@@ -142,7 +142,7 @@ socketIO.loop();
 
         // add payload (parameters) for the event
         JsonObject param1 = array.createNestedObject();
-        param1["Balanza Mensaje Test:"] = (uint32_t) now;
+        param1["Balanza"] = (uint32_t) now;
 
         // JSON to String (serializion)
         String output;
