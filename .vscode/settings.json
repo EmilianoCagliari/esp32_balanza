@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "*.css": "css",
+        "css": "css",
+        "random": "cpp",
+        "cmath": "cpp"
+    }
+}
