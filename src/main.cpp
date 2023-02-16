@@ -1,22 +1,43 @@
 #include <Arduino.h>
+#include <Wire.h>
+
+// Display
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// Balanza
 #include "HX711.h"
+
 #include "soc/rtc.h"
 #include <Pushbutton.h>
 
+// WebSocket
 #include <WebSocketsClient.h>
 #include <SocketIOclient.h>
 
+// Json
 #include <ArduinoJson.h>
 
+// Wifi
 #include <WiFiMulti.h>
 
 // HX711 circuit wiring
 const int LOADCELL_DOUT_PIN = 16;
 const int LOADCELL_SCK_PIN = 4;
 
+// Scale Const
 HX711 scale;
 float reading;
 float lastReading;
+
+// Display Const
+#define SCREEN_WIDTH 128 // OLED width,  in pixels
+#define SCREEN_HEIGHT 64 // OLED height, in pixels
+#define OLED_RESET -1    // OLED RESET
+
+String msg;
+unsigned long messageTimestamp = 0;
+
 
 // REPLACE WITH YOUR CALIBRATION FACTOR
 #define CALIBRATION_FACTOR 396.717
@@ -26,7 +47,14 @@ float lastReading;
 Pushbutton button(BUTTON_PIN);
 
 WiFiMulti wifimulti;
+boolean wifiConn = false;
+
+// Socket
 SocketIOclient socketIO;
+boolean socketConn = false;
+
+// create an OLED display object connected to I2C
+Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 void hexdump(const void *mem, uint32_t len, uint8_t cols = 16)
 {
@@ -50,10 +78,11 @@ void socketIOEvent(socketIOmessageType_t type, uint8_t *payload, size_t length)
     {
     case sIOtype_DISCONNECT:
         Serial.printf("[IOc] Disconnected!\n");
+        socketConn = false;
         break;
     case sIOtype_CONNECT:
         Serial.printf("[IOc] Connected to url: %s\n", payload);
-
+        socketConn = true;
         // join default namespace (no auto join in Socket.IO V3)
         socketIO.send(sIOtype_CONNECT, "/");
         break;
@@ -88,11 +117,23 @@ void scaleInit()
     scale.tare();                        // reset the scale to 0
 }
 
+void displayString(String msg)
+{
+    oled.clearDisplay();
+    oled.setTextSize(1);
+    oled.setTextColor(WHITE);
+    oled.setCursor(0, 30);
+    oled.print(msg);
+    oled.display();
+}
+
 void wifiInit()
 {
-    for (uint8_t t = 3; t > 0; t--)
+    for (int t = 3; t > 0; t--)
     {
         Serial.printf("[SETUP] BOOT WAIT %d...\n", t);
+        msg = "Booting... \nplease wait. ";
+        displayString(msg);
         Serial.flush();
         delay(1000);
     }
@@ -108,17 +149,25 @@ void wifiInit()
     // WiFi.disconnect();
     while (wifimulti.run() != WL_CONNECTED)
     {
+        wifiConn = false;
         delay(100);
     }
 
+    wifiConn = true;
     String ip = WiFi.localIP().toString();
     Serial.printf("[SETUP] WiFi Connected %s\n", ip.c_str());
+
+    msg = "[SETUP] WiFi Connected " + ip;
+    displayString(msg);
 }
 
 void socketIoInit()
 {
     // server address, port and URL
     socketIO.begin("192.168.1.133", 8081, "/socket.io/?EIO=4");
+
+    // server Auth headers
+    // socketIO.setExtraHeaders("token": "AQUI VA EL JWT");
 
     // event handler
     socketIO.onEvent(socketIOEvent);
@@ -151,10 +200,61 @@ void socketIoSendData(float reading)
     // delay(2000);
 }
 
+void displayInit()
+{
+    if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+    {
+        Serial.println(F("SSD1306 allocation failed"));
+        for (;;)
+            ;
+    }
+}
+
+void displayWeight(float weight)
+{
+    oled.clearDisplay();
+
+    oled.setTextSize(1);
+    oled.setTextColor(WHITE);
+    oled.setCursor(0, 10);
+    // oled static text
+    oled.print("Wifi: ");
+    oled.print((wifiConn) ? "ok " : "! ");
+    oled.display();
+
+    oled.setTextSize(1);
+    oled.setTextColor(WHITE);
+    oled.setCursor(60, 10);
+    // oled static text
+
+    oled.print("Socket: ");
+    oled.print((socketConn) ? "ok " : "! ");
+
+    oled.display();
+
+    oled.setTextSize(1);
+    oled.setTextColor(WHITE);
+    oled.setCursor(0, 30);
+    // oled static text
+    oled.println("Peso:");
+    oled.display();
+
+    oled.setCursor(0, 45);
+    oled.setTextSize(2);
+    oled.print(weight);
+    oled.print(" ");
+    oled.print("g");
+    oled.display();
+}
+
 void setup()
 {
     Serial.begin(115200);
+
     setCpuFrequencyMhz(80);
+
+    displayInit();
+
     scaleInit();
 
     wifiInit();
@@ -162,23 +262,21 @@ void setup()
     socketIoInit();
 }
 
-unsigned long messageTimestamp = 0;
 
 void loop()
 {
 
     socketIO.loop();
     uint64_t now = millis();
-    
 
     if (button.getSingleDebouncedPress())
     {
         Serial.print("tare...");
 
-        //Valor "bandera" para indicar que se esta calibrando la balanza.
+        // Valor "bandera" para indicar que se esta calibrando la balanza.
         socketIoSendData(-9999);
 
-        //Calibrando.
+        // Calibrando.
         scale.tare();
     }
 
@@ -192,15 +290,17 @@ void loop()
 
         if (now - messageTimestamp > 1000)
         {
-            //Variable de control de tiempo
+            // Variable de control de tiempo
             messageTimestamp = now;
 
             // Control de lectura de la balanza entre -1gr y 1-gr se pone 0
-            if(reading > -1 && reading < 1) {
+            if (reading > -1 && reading < 1)
+            {
                 reading = 0;
-            } 
+            }
 
-            //Funcion de envío de data con el valor de la balanza.
+            displayWeight(reading);
+            // Funcion de envío de data con el valor de la balanza.
             socketIoSendData(reading);
         }
     }
@@ -208,6 +308,4 @@ void loop()
     {
         Serial.println("HX711 not found.");
     }
-
-    
 }
