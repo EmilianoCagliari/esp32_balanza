@@ -38,7 +38,6 @@ float lastReading;
 String msg;
 unsigned long messageTimestamp = 0;
 
-
 // REPLACE WITH YOUR CALIBRATION FACTOR
 #define CALIBRATION_FACTOR 396.717
 
@@ -144,8 +143,8 @@ void wifiInit()
         WiFi.softAPdisconnect(true);
     }
 
-    wifimulti.addAP("MIWIFI_2G_3iyZ", "DmrTqfTw");
-
+    // wifimulti.addAP("MIWIFI_2G_3iyZ", "DmrTqfTw");
+    wifimulti.addAP("Emiliano", "j9c05r27nno14");
     // WiFi.disconnect();
     while (wifimulti.run() != WL_CONNECTED)
     {
@@ -262,11 +261,13 @@ void setup()
     socketIoInit();
 }
 
-
 void loop()
 {
 
-    socketIO.loop();
+    if (socketConn)
+    {
+        socketIO.loop();
+    }
     uint64_t now = millis();
 
     if (button.getSingleDebouncedPress())
@@ -301,7 +302,10 @@ void loop()
 
             displayWeight(reading);
             // Funcion de envío de data con el valor de la balanza.
-            socketIoSendData(reading);
+            if (socketConn)
+            {
+                socketIoSendData(reading);
+            }
         }
     }
     else
