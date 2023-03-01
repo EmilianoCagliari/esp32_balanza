@@ -143,8 +143,8 @@ void wifiInit()
         WiFi.softAPdisconnect(true);
     }
 
-    // wifimulti.addAP("MIWIFI_2G_3iyZ", "DmrTqfTw");
-    wifimulti.addAP("Emiliano", "j9c05r27nno14");
+    wifimulti.addAP("MIWIFI_2G_3iyZ", "DmrTqfTw");
+    // wifimulti.addAP("Emiliano", "j9c05r27nno14");
     // WiFi.disconnect();
     while (wifimulti.run() != WL_CONNECTED)
     {
@@ -174,7 +174,6 @@ void socketIoInit()
 
 void socketIoSendData(float reading)
 {
-
     // creat JSON message for Socket.IO (event)
     DynamicJsonDocument doc(1024);
     JsonArray array = doc.to<JsonArray>();
@@ -231,19 +230,32 @@ void displayWeight(float weight)
 
     oled.display();
 
-    oled.setTextSize(1);
-    oled.setTextColor(WHITE);
-    oled.setCursor(0, 30);
-    // oled static text
-    oled.println("Peso:");
-    oled.display();
+    if (weight == -9999)
+    {
 
-    oled.setCursor(0, 45);
-    oled.setTextSize(2);
-    oled.print(weight);
-    oled.print(" ");
-    oled.print("g");
-    oled.display();
+        oled.setTextSize(2);
+        oled.setTextColor(WHITE);
+        oled.setCursor(5, 30);
+        // oled static text
+        oled.println("CALIBRANDO...");
+        oled.display();
+    }
+    else
+    {
+        oled.setTextSize(1);
+        oled.setTextColor(WHITE);
+        oled.setCursor(0, 30);
+        // oled static text
+        oled.println("Peso:");
+        oled.display();
+
+        oled.setCursor(0, 45);
+        oled.setTextSize(2);
+        oled.print(weight);
+        oled.print(" ");
+        oled.print("g");
+        oled.display();
+    }
 }
 
 void setup()
@@ -274,42 +286,49 @@ void loop()
     {
         Serial.print("tare...");
 
-        // Valor "bandera" para indicar que se esta calibrando la balanza.
-        socketIoSendData(-9999);
+        displayWeight(-9999);
+
+        if (socketConn)
+        {
+
+            // Valor "bandera" para indicar que se esta calibrando la balanza.
+            socketIoSendData(-9999);
+        }
 
         // Calibrando.
         scale.tare();
     }
 
-    if (scale.wait_ready_timeout(200))
+    if (now - messageTimestamp > 1000)
     {
-        // reading = round(scale.get_units());
+
+        // Variable de control de tiempo
+        messageTimestamp = now;
+
         reading = scale.get_units(5);
-        // Serial.print("Weight: ");
-        // Serial.println(reading, 2);
+
         lastReading = reading;
 
-        if (now - messageTimestamp > 1000)
+        // Control de lectura de la balanza entre -1gr y 1-gr se pone 0
+        if (reading > -1 && reading < 1)
         {
-            // Variable de control de tiempo
-            messageTimestamp = now;
+            reading = 0;
+        }
 
-            // Control de lectura de la balanza entre -1gr y 1-gr se pone 0
-            if (reading > -1 && reading < 1)
-            {
-                reading = 0;
-            }
-
-            displayWeight(reading);
-            // Funcion de envío de data con el valor de la balanza.
-            if (socketConn)
-            {
-                socketIoSendData(reading);
-            }
+        displayWeight(reading);
+        // Funcion de envío de data con el valor de la balanza.
+        if (socketConn)
+        {
+            socketIoSendData(reading);
         }
     }
-    else
-    {
-        Serial.println("HX711 not found.");
-    }
+
+    // if (scale.wait_ready_timeout(200))
+    // {
+
+    // }
+    // else
+    // {
+    //     Serial.println("HX711 not found.");
+    // }
 }
