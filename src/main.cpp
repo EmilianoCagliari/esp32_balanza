@@ -45,6 +45,10 @@ unsigned long messageTimestamp = 0;
 #define BUTTON_PIN 19
 Pushbutton button(BUTTON_PIN);
 
+// DeepSleep Button
+#define BUTTON_PIN_BITMASK 0x200000000;
+
+// Wifi
 WiFiMulti wifimulti;
 boolean wifiConn = false;
 
@@ -52,8 +56,14 @@ boolean wifiConn = false;
 SocketIOclient socketIO;
 boolean socketConn = false;
 
+// Scale
+boolean isZero = false;
+RTC_DATA_ATTR int zeroCount = 0;
+
 // create an OLED display object connected to I2C
 Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// =============  Funciones ==============
 
 void hexdump(const void *mem, uint32_t len, uint8_t cols = 16)
 {
@@ -258,9 +268,18 @@ void displayWeight(float weight)
     }
 }
 
+// ============ Funciones CORE del ESP32 Arduino ============
+
 void setup()
 {
     Serial.begin(115200);
+    zeroCount = 0;
+        // ===== START DEEP SLEEP =======
+
+        /* Variable to WakeUp the ESP32 */
+        esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 1); // 1 = High, 0 = Low
+
+    // ===== END DEEP SLEEP =======
 
     setCpuFrequencyMhz(80);
 
@@ -281,6 +300,12 @@ void loop()
         socketIO.loop();
     }
     uint64_t now = millis();
+
+    if (isZero)
+    {
+        displayString("Entrando en modo descanso, presione el boton izquierdo para despertar.");
+        esp_deep_sleep_start();
+    }
 
     if (button.getSingleDebouncedPress())
     {
@@ -313,6 +338,16 @@ void loop()
         if (reading > -1 && reading < 1)
         {
             reading = 0;
+        }
+
+        if (reading == 0)
+        {
+            zeroCount++;
+            Serial.println(zeroCount);
+            if (zeroCount == 10)
+            {
+                isZero = true;
+            }
         }
 
         displayWeight(reading);
