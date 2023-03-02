@@ -304,6 +304,7 @@ void loop()
     if (isZero)
     {
         displayString("Entrando en modo descanso, presione el boton izquierdo para despertar.");
+        oled.ssd1306_command(SSD1306_DISPLAYOFF); // Apaga el display - Falta agregar un timer para visualizar el mensaje y luego apagar.
         esp_deep_sleep_start();
     }
 
