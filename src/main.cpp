@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+// Timers
+#include <Ticker.h>
+
 // Display
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -45,8 +48,12 @@ unsigned long messageTimestamp = 0;
 #define BUTTON_PIN 19
 Pushbutton button(BUTTON_PIN);
 
-// DeepSleep Button
+// DeepSleep Button and Timer
 #define BUTTON_PIN_BITMASK 0x200000000;
+RTC_DATA_ATTR int dpTimeCount = 0; //Value saved in RTC (Deep Sleep Mode)
+static int SLEEP_TIME = 30;  // SLEEP TIME IN SECONDS
+
+Ticker timerSleep;  //Timer Instance
 
 // Wifi
 WiFiMulti wifimulti;
@@ -55,10 +62,6 @@ boolean wifiConn = false;
 // Socket
 SocketIOclient socketIO;
 boolean socketConn = false;
-
-// Scale
-boolean isZero = false;
-RTC_DATA_ATTR int zeroCount = 0;
 
 // create an OLED display object connected to I2C
 Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -131,7 +134,7 @@ void displayString(String msg)
     oled.clearDisplay();
     oled.setTextSize(1);
     oled.setTextColor(WHITE);
-    oled.setCursor(0, 30);
+    oled.setCursor(0, 15);
     oled.print(msg);
     oled.display();
 }
@@ -268,16 +271,37 @@ void displayWeight(float weight)
     }
 }
 
+void startDeepSleep()
+{
+    displayString("Entrando en modo descanso, presione el boton izquierdo para despertar.");
+    // oled.ssd1306_command(SSD1306_DISPLAYOFF); // Apaga el display - Falta agregar un timer para visualizar el mensaje y luego apagar.
+    esp_deep_sleep_start();
+}
+
+void deepSleepTimer()
+{
+
+    dpTimeCount++;
+    Serial.println( (String)"Timer: " + (String) dpTimeCount );
+
+    if (dpTimeCount == SLEEP_TIME)
+    {
+         Serial.println((String) "Modo DeepSleep Iniciado");
+        startDeepSleep();
+    }
+}
+
 // ============ Funciones CORE del ESP32 Arduino ============
 
 void setup()
 {
     Serial.begin(115200);
-    zeroCount = 0;
-        // ===== START DEEP SLEEP =======
+    dpTimeCount = 0;
 
-        /* Variable to WakeUp the ESP32 */
-        esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 1); // 1 = High, 0 = Low
+    // ===== START DEEP SLEEP =======
+
+    /* Variable to WakeUp the ESP32 */
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 1); // 1 = High, 0 = Low
 
     // ===== END DEEP SLEEP =======
 
@@ -299,15 +323,26 @@ void loop()
     {
         socketIO.loop();
     }
+
     uint64_t now = millis();
 
-    if (isZero)
-    {
-        displayString("Entrando en modo descanso, presione el boton izquierdo para despertar.");
-        oled.ssd1306_command(SSD1306_DISPLAYOFF); // Apaga el display - Falta agregar un timer para visualizar el mensaje y luego apagar.
-        esp_deep_sleep_start();
-    }
+    // if (isZero && dpTimeCount == 0)
+    // {
 
+    //     uint64_t doSleep = 0;
+    //     while (doSleep < 4)
+    //     {
+    //         doSleep++;
+    //         Serial.print('doSleep');
+    //     }
+
+    //     if (doSleep == 4)
+    //     {
+
+    //     }
+    // }
+
+    // Sentencia de calibración de balanza al pulsar el boton derecho
     if (button.getSingleDebouncedPress())
     {
         Serial.print("tare...");
@@ -325,6 +360,7 @@ void loop()
         scale.tare();
     }
 
+    // Sentencia de accion para comprobar cada 1000ms (1 seg)
     if (now - messageTimestamp > 1000)
     {
 
@@ -341,14 +377,18 @@ void loop()
             reading = 0;
         }
 
-        if (reading == 0)
+        // Si el registro es 0 y el Timer no esta activo se activa
+        if (reading == 0 && !timerSleep.active())
         {
-            zeroCount++;
-            Serial.println(zeroCount);
-            if (zeroCount == 10)
-            {
-                isZero = true;
-            }
+            timerSleep.attach(1, deepSleepTimer);
+        }
+
+        // Si el registro es DIFERENTE de 0 y el Timer esta activado se desactiva.
+        if (reading != 0 && timerSleep.active())
+        {
+            Serial.println( (String) "Detach Timer");
+            dpTimeCount = 0;
+            timerSleep.detach();
         }
 
         displayWeight(reading);
@@ -359,12 +399,5 @@ void loop()
         }
     }
 
-    // if (scale.wait_ready_timeout(200))
-    // {
 
-    // }
-    // else
-    // {
-    //     Serial.println("HX711 not found.");
-    // }
 }
