@@ -1,8 +1,7 @@
 {
     "files.associations": {
-        "*.css": "css",
-        "css": "css",
-        "random": "cpp",
-        "cmath": "cpp"
+        "array": "cpp",
+        "string": "cpp",
+        "string_view": "cpp"
     }
 }

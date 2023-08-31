@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+// Timers
+#include <Ticker.h>
+
 // Display
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -45,15 +48,27 @@ unsigned long messageTimestamp = 0;
 #define BUTTON_PIN 19
 Pushbutton button(BUTTON_PIN);
 
+// DeepSleep Button and Timer
+#define BUTTON_PIN_BITMASK 0x200000000;
+RTC_DATA_ATTR int dpTimeCount = 0; // Value saved in RTC (Deep Sleep Mode)
+static int SLEEP_TIME = 300;       // SLEEP TIME IN SECONDS
+
+Ticker timerSleep; // Timer Instance
+
+// Wifi
 WiFiMulti wifimulti;
 boolean wifiConn = false;
 
 // Socket
 SocketIOclient socketIO;
-boolean socketConn = false;
+boolean socketConn = true;
+boolean roomJoined = false;
+String roomName = "scale_device";
 
 // create an OLED display object connected to I2C
 Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// =============  Funciones ==============
 
 void hexdump(const void *mem, uint32_t len, uint8_t cols = 16)
 {
@@ -73,6 +88,8 @@ void hexdump(const void *mem, uint32_t len, uint8_t cols = 16)
 
 void socketIOEvent(socketIOmessageType_t type, uint8_t *payload, size_t length)
 {
+    Serial.println((String) "SocketIoEvent Type: " + (String)type + (String) "%s\n");
+
     switch (type)
     {
     case sIOtype_DISCONNECT:
@@ -121,7 +138,7 @@ void displayString(String msg)
     oled.clearDisplay();
     oled.setTextSize(1);
     oled.setTextColor(WHITE);
-    oled.setCursor(0, 30);
+    oled.setCursor(0, 15);
     oled.print(msg);
     oled.display();
 }
@@ -163,7 +180,7 @@ void wifiInit()
 void socketIoInit()
 {
     // server address, port and URL
-    socketIO.begin("192.168.1.133", 8081, "/socket.io/?EIO=4");
+    socketIO.begin("192.168.1.133", 8081, "/socket.io/?EIO=4"); // Removido 3er argumento de conexion "/socket.io/?EIO=4"
 
     // server Auth headers
     // socketIO.setExtraHeaders("token": "AQUI VA EL JWT");
@@ -172,26 +189,65 @@ void socketIoInit()
     socketIO.onEvent(socketIOEvent);
 }
 
-void socketIoSendData(float reading)
+// 08:5b:d6:0b:0c:9d
+
+void socketIoSendData(String event_name, void *data, size_t dataSize, const String &optionalData = "")
 {
-    // creat JSON message for Socket.IO (event)
+
+    // create JSON message for Socket.IO (event)
     DynamicJsonDocument doc(1024);
     JsonArray array = doc.to<JsonArray>();
 
-    // add evnet name
+    // Event name
     // Hint: socket.on('event_name', ....
-    array.add("mensaje");
+    array.add(event_name);
 
     // add payload (parameters) for the event
-    JsonObject param1 = array.createNestedObject();
 
-    param1["Balanza"] = reading;
+    // [
+    //     "Evento",
+    //     "data" : {
+    //         {"data": 0},
+    //         {"room": "nested"}
+    //     }
+    // ]
+
+    // Type of data is recieved
+    if (dataSize == sizeof(float)) // Is float type
+    {
+        JsonObject param1 = doc.createNestedObject();
+        float *floatData = static_cast<float *>(data);
+        // Aquí puedes enviar *floatData a través de socket.io como un número flotante.
+        float dataFloat = *floatData;
+
+        param1["data"] = dataFloat;
+
+        Serial.println("Data OptionalData: " + optionalData);
+        if (optionalData.length() > 0)
+        {
+            param1["room"] = optionalData;
+        }
+    } else if (dataSize > 0) // Is String type
+    {
+        JsonObject param1 = doc.createNestedObject();
+
+        String *stringData = static_cast<String *>(data);
+        // Aquí puedes enviar *stringData a través de socket.io como una cadena.
+        String dataString = *stringData;
+        param1["room"] = dataString;
+    }
+
+    // Armado del array de objetos de datos
+
+    // Serial.println("Data Socket Enviado:" + (String)reading);
+
     // (uint32_t) weight;
 
     // JSON to String (serializion)
     String output;
     serializeJson(doc, output);
 
+    Serial.println("JSON OUTPUT:" + output);
     // Send event
     socketIO.sendEVENT(output);
 
@@ -258,9 +314,41 @@ void displayWeight(float weight)
     }
 }
 
+void startDeepSleep()
+{
+    // displayString("Entrando en modo descanso, presione el boton izquierdo para despertar.");
+    oled.ssd1306_command(SSD1306_DISPLAYOFF); // Apaga el display - Falta agregar un timer para visualizar el mensaje y luego apagar.
+    esp_deep_sleep_start();
+}
+
+void deepSleepTimer()
+{
+
+    dpTimeCount++;
+    // Serial.println((String) "Timer: " + (String)dpTimeCount);
+
+    if (dpTimeCount == SLEEP_TIME)
+    {
+        // Envio de dato para desconectar el "room" creado en el backend
+        socketIoSendData("event_leave", &roomName, sizeof(roomName));
+        Serial.println((String) "Modo DeepSleep Iniciado");
+        startDeepSleep();
+    }
+}
+
+// ============ Funciones CORE del ESP32 Arduino ============
+
 void setup()
 {
     Serial.begin(115200);
+    dpTimeCount = 0;
+
+    // ===== START DEEP SLEEP =======
+
+    /* Variable to WakeUp the ESP32 */
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_33, 1); // 1 = High, 0 = Low
+
+    // ===== END DEEP SLEEP =======
 
     setCpuFrequencyMhz(80);
 
@@ -276,12 +364,23 @@ void setup()
 void loop()
 {
 
-    if (socketConn)
-    {
-        socketIO.loop();
-    }
+    // if (socketConn)
+    // {
+    //     socketIO.loop();
+    // }
+
+    socketIO.loop();
+
     uint64_t now = millis();
 
+    if (!roomJoined)
+    {
+        // Envio de dato para crear el "room" en el backend
+        socketIoSendData("event_join", &roomName, sizeof(roomName));
+        roomJoined = true;
+    }
+
+    // Sentencia de calibración de balanza al pulsar el boton derecho
     if (button.getSingleDebouncedPress())
     {
         Serial.print("tare...");
@@ -290,15 +389,16 @@ void loop()
 
         if (socketConn)
         {
-
+            float myFloat = -9999;
             // Valor "bandera" para indicar que se esta calibrando la balanza.
-            socketIoSendData(-9999);
+            socketIoSendData("event_message"  , &myFloat, sizeof(myFloat));
         }
 
         // Calibrando.
         scale.tare();
     }
 
+    // Sentencia de accion para comprobar cada 1000ms (1 seg)
     if (now - messageTimestamp > 1000)
     {
 
@@ -315,20 +415,26 @@ void loop()
             reading = 0;
         }
 
+        // Si el registro es 0 y el Timer no esta activo se activa
+        if (reading == 0 && !timerSleep.active())
+        {
+            timerSleep.attach(1, deepSleepTimer);
+        }
+
+        // Si el registro es DIFERENTE de 0 y el Timer esta activado se desactiva.
+        if (reading != 0 && timerSleep.active())
+        {
+            Serial.println((String) "Detach Timer");
+            dpTimeCount = 0;
+            timerSleep.detach();
+        }
+
         displayWeight(reading);
         // Funcion de envío de data con el valor de la balanza.
-        if (socketConn)
+        if (socketConn && roomJoined)
         {
-            socketIoSendData(reading);
+            // Evento de envio de dato del peso
+            socketIoSendData("event_message", &reading, sizeof(reading), roomName);
         }
     }
-
-    // if (scale.wait_ready_timeout(200))
-    // {
-
-    // }
-    // else
-    // {
-    //     Serial.println("HX711 not found.");
-    // }
 }
