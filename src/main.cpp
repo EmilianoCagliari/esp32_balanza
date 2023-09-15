@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+// Config File
+#include <config.h>
+
 // Timers
 #include <Ticker.h>
 
@@ -160,8 +163,7 @@ void wifiInit()
         WiFi.softAPdisconnect(true);
     }
 
-    wifimulti.addAP("MIWIFI_2G_3iyZ", "DmrTqfTw");
-    // wifimulti.addAP("Emiliano", "j9c05r27nno14");
+    wifimulti.addAP(WIFI_SSID, WIFI_PASSWORD);
     // WiFi.disconnect();
     while (wifimulti.run() != WL_CONNECTED)
     {
@@ -180,7 +182,7 @@ void wifiInit()
 void socketIoInit()
 {
     // server address, port and URL
-    socketIO.begin("192.168.1.133", 8081, "/socket.io/?EIO=4"); // Removido 3er argumento de conexion "/socket.io/?EIO=4"
+    socketIO.begin(socketIO_HOST, socketIO_PORT, socketIO_URL); // Removido 3er argumento de conexion "/socket.io/?EIO=4"
 
     // server Auth headers
     // socketIO.setExtraHeaders("token": "AQUI VA EL JWT");
@@ -227,7 +229,8 @@ void socketIoSendData(String event_name, void *data, size_t dataSize, const Stri
         {
             param1["room"] = optionalData;
         }
-    } else if (dataSize > 0) // Is String type
+    }
+    else if (dataSize > 0) // Is String type
     {
         JsonObject param1 = doc.createNestedObject();
 
@@ -373,11 +376,14 @@ void loop()
 
     uint64_t now = millis();
 
-    if (!roomJoined)
+    if (socketConn)
     {
-        // Envio de dato para crear el "room" en el backend
-        socketIoSendData("event_join", &roomName, sizeof(roomName));
-        roomJoined = true;
+        if (!roomJoined)
+        {
+            // Envio de dato para crear el "room" en el backend
+            socketIoSendData("event_join", &roomName, sizeof(roomName));
+            roomJoined = true;
+        }
     }
 
     // Sentencia de calibración de balanza al pulsar el boton derecho
@@ -391,15 +397,15 @@ void loop()
         {
             float myFloat = -9999;
             // Valor "bandera" para indicar que se esta calibrando la balanza.
-            socketIoSendData("event_message"  , &myFloat, sizeof(myFloat));
+            socketIoSendData("event_message", &myFloat, sizeof(myFloat));
         }
 
         // Calibrando.
         scale.tare();
     }
 
-    // Sentencia de accion para comprobar cada 1000ms (1 seg)
-    if (now - messageTimestamp > 1000)
+    // Sentencia de accion para comprobar cada 2000ms (2 seg)
+    if (now - messageTimestamp > 2000)
     {
 
         // Variable de control de tiempo
